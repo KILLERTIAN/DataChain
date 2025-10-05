@@ -87,7 +87,7 @@ export async function GET(
     
     if (isEncrypted) {
       // For encrypted files, we must proxy and decrypt
-      const ipfsGateway = process.env.IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs';
+      const ipfsGateway = process.env.NEXT_PUBLIC_IPFS_GATEWAY || 'https://brown-imaginative-bug-610.mypinata.cloud/ipfs';
       const fileUrl = `${ipfsGateway}/${dataset.cid}`;
       
       try {

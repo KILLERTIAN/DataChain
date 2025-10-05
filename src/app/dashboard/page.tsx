@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { SmartFileViewer } from "@/components/SmartFileViewer";
 import { 
   Database, 
   Upload, 
@@ -15,7 +16,8 @@ import {
   Eye,
   Edit,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from "lucide-react";
 import Link from "next/link";
 
@@ -75,6 +77,8 @@ export default function Dashboard() {
   const { account, connected } = useWallet();
   const [activeTab, setActiveTab] = useState("overview");
   const [userDatasets, setUserDatasets] = useState<any[]>([]);
+  const [allDatasets, setAllDatasets] = useState<any[]>([]);
+  const [pinataFiles, setPinataFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalDatasets: 0,
@@ -83,13 +87,12 @@ export default function Dashboard() {
     followers: 0
   });
 
-  // Fetch user's datasets
+  // Fetch user's datasets and all datasets
   useEffect(() => {
     if (connected && account?.address) {
       fetchUserDatasets();
-    } else {
-      setLoading(false);
     }
+    fetchAllDatasets();
   }, [connected, account]);
 
   const fetchUserDatasets = async () => {
@@ -114,6 +117,29 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+
+  const fetchAllDatasets = async () => {
+    try {
+      const response = await fetch('/api/datasets');
+      const data = await response.json();
+      
+      if (data.success) {
+        const datasets = data.datasets || [];
+        setAllDatasets(datasets);
+        
+        // Separate Pinata files
+        const pinataDatasets = datasets.filter((d: any) => d.creator === 'Pinata Upload');
+        setPinataFiles(pinataDatasets);
+        
+        console.log('Dashboard - Total datasets:', datasets.length);
+        console.log('Dashboard - Pinata files:', pinataDatasets.length);
+      }
+    } catch (error) {
+      console.error('Failed to fetch all datasets:', error);
+    }
+  };
+
+
 
   if (!connected) {
     return (
@@ -254,6 +280,18 @@ export default function Dashboard() {
             >
               Activity
             </button>
+            {pinataFiles.length > 0 && (
+              <button
+                onClick={() => setActiveTab("pinata")}
+                className={`px-6 py-3 rounded-xl font-medium transition-all ${
+                  activeTab === "pinata"
+                    ? "bg-green-600 text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Pinata Files ({pinataFiles.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -261,10 +299,11 @@ export default function Dashboard() {
         {activeTab === "overview" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Recent Datasets */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-6">
+              {/* User's Datasets */}
               <Card className="bg-gray-800/50 border-gray-700 p-6 rounded-3xl">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-semibold text-white">Recent Datasets</h3>
+                  <h3 className="text-xl font-semibold text-white">Your Recent Datasets</h3>
                   <Link href="/dashboard?tab=datasets">
                     <Button variant="ghost" size="sm" className="text-purple-400 hover:text-purple-300">
                       View All
@@ -285,11 +324,11 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          dataset.status === "verified" 
+                          dataset.verified 
                             ? "bg-green-500/20 text-green-400"
                             : "bg-yellow-500/20 text-yellow-400"
                         }`}>
-                          {dataset.status}
+                          {dataset.verified ? 'verified' : 'pending'}
                         </span>
                         <Button variant="ghost" size="sm">
                           <MoreHorizontal className="h-4 w-4" />
@@ -297,8 +336,79 @@ export default function Dashboard() {
                       </div>
                     </div>
                   ))}
+                  {userDatasets.length === 0 && (
+                    <div className="text-center py-8">
+                      <Database className="h-12 w-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400 mb-4">No datasets uploaded yet</p>
+                      <Link href="/upload">
+                        <Button size="sm" className="bg-purple-600 hover:bg-purple-700 rounded-xl">
+                          Upload Your First Dataset
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
                 </div>
               </Card>
+
+              {/* Pinata Files */}
+              {pinataFiles.length > 0 && (
+                <Card className="bg-gradient-to-r from-green-900/20 to-green-800/20 border-green-700/50 p-6 rounded-3xl">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-xl font-semibold text-green-300">Pinata IPFS Files</h3>
+                      <p className="text-green-400/80 text-sm">
+                        {pinataFiles.length} files from your Pinata account
+                      </p>
+                    </div>
+
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pinataFiles.slice(0, 4).map((file) => (
+                      <div key={file.id} className="p-4 bg-gray-800/50 border border-green-700/30 rounded-2xl">
+                        <div className="mb-3">
+                          <h4 className="font-medium text-white mb-1">{file.title}</h4>
+                          <p className="text-sm text-gray-400 mb-2">{file.description}</p>
+                          <div className="flex items-center gap-3 text-xs text-green-400">
+                            <span>📁 {file.size}</span>
+                            <span>⬇️ {file.downloads}</span>
+                          </div>
+                        </div>
+                        {file.cid && (
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => window.open(`/api/files/${file.cid}`, '_blank')}
+                              size="sm"
+                              variant="outline"
+                              className="border-green-600 text-green-300 hover:bg-green-700/20 rounded-xl flex-1"
+                            >
+                              <Eye className="h-3 w-3 mr-1" />
+                              Preview
+                            </Button>
+                            <Button
+                              onClick={() => window.open(`/api/files/${file.cid}?download=true`, '_blank')}
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700 rounded-xl"
+                            >
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {pinataFiles.length > 4 && (
+                    <div className="mt-4 text-center">
+                      <Button
+                        onClick={() => setActiveTab("pinata")}
+                        variant="ghost"
+                        className="text-green-400 hover:text-green-300"
+                      >
+                        View All {pinataFiles.length} Pinata Files
+                      </Button>
+                    </div>
+                  )}
+                </Card>
+              )}
             </div>
 
             {/* Quick Actions */}
@@ -457,6 +567,96 @@ export default function Dashboard() {
               ))}
             </div>
           </Card>
+        )}
+
+        {activeTab === "pinata" && (
+          <div className="space-y-6">
+            <Card className="bg-gradient-to-r from-green-900/20 to-green-800/20 border-green-700/50 p-6 rounded-3xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-2xl font-semibold text-green-300">Pinata IPFS Files</h3>
+                  <p className="text-green-400/80">
+                    Manage and preview files from your Pinata account
+                  </p>
+                </div>
+                <Button
+                  onClick={fetchAllDatasets}
+                  variant="outline"
+                  className="border-green-600 text-green-300 hover:bg-green-700/20 rounded-xl"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+
+              {pinataFiles.length === 0 ? (
+                <div className="text-center py-12">
+                  <Database className="h-16 w-16 text-green-600/50 mx-auto mb-4" />
+                  <h4 className="text-xl font-semibold text-green-400 mb-2">No Pinata Files Found</h4>
+                  <p className="text-green-400/70 mb-6">Upload files to your Pinata account to see them here</p>
+                  <Button
+                    onClick={() => window.open('https://app.pinata.cloud', '_blank')}
+                    className="bg-green-600 hover:bg-green-700 rounded-xl"
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Open Pinata Dashboard
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {pinataFiles.map((file) => (
+                    <Card key={file.id} className="bg-gray-800/50 border-green-700/30 p-6 rounded-2xl">
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-semibold text-white">{file.title}</h4>
+                          <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">
+                            Pinata
+                          </span>
+                        </div>
+                        <p className="text-gray-400 text-sm mb-3">{file.description}</p>
+                        <div className="flex items-center gap-4 text-xs text-green-400 mb-4">
+                          <span>📁 {file.size}</span>
+                          <span>⬇️ {file.downloads}</span>
+                          <span>👁️ {file.views || 0}</span>
+                          <span>🔗 CID: {file.cid?.slice(0, 8)}...</span>
+                        </div>
+                      </div>
+                      
+                      {file.cid && (
+                        <div className="space-y-3">
+                          <SmartFileViewer
+                            cid={file.cid}
+                            filename={file.title}
+                            size={file.size}
+                          />
+                          
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => window.open(`/datasets/${file.id}`, '_blank')}
+                              size="sm"
+                              variant="outline"
+                              className="border-green-600 text-green-300 hover:bg-green-700/20 rounded-xl flex-1"
+                            >
+                              <Eye className="h-3 w-3 mr-1" />
+                              Details
+                            </Button>
+                            <Button
+                              onClick={() => window.open(`https://brown-imaginative-bug-610.mypinata.cloud/ipfs/${file.cid}`, '_blank')}
+                              size="sm"
+                              variant="outline"
+                              className="border-green-600 text-green-300 hover:bg-green-700/20 rounded-xl"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
         )}
       </div>
     </div>

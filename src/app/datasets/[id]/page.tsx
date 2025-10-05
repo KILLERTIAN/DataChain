@@ -1,18 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LicenseBadge } from "@/components/LicenseBadge";
 import { VersionTimeline } from "@/components/VersionTimeline";
-import { 
-  Download, 
-  ExternalLink, 
-  Shield, 
-  User, 
-  Calendar, 
-  Database, 
-  Eye, 
+import { FilePreview } from "@/components/FilePreview";
+import { SmartFileViewer } from "@/components/SmartFileViewer";
+import { generateFileUrl, generateDirectIpfsUrl } from "@/lib/pinata";
+import {
+  Download,
+  ExternalLink,
+  Shield,
+  User,
+  Calendar,
+  Database,
+  Eye,
   Share2,
   Flag,
   Heart,
@@ -27,29 +31,28 @@ interface DatasetDetailProps {
   params: { id: string };
 }
 
-// Mock data - replace with actual blockchain data
-const datasetMetadata = {
-  id: "1",
-  name: "COVID-19 Research Dataset",
-  description: "Comprehensive COVID-19 research data including patient demographics, symptoms, treatment outcomes, and epidemiological patterns. This dataset has been anonymized and prepared for research purposes in compliance with healthcare data regulations.",
-  owner: "0x1234567890abcdef1234567890abcdef12345678",
-  hash: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
-  licenseType: "MIT",
-  category: "Healthcare & Medical",
-  tags: ["healthcare", "covid-19", "research", "epidemiology"],
-  size: "2.3 GB",
-  downloads: 1250,
-  views: 3400,
-  trustScore: 95,
-  verified: true,
-  createdAt: "2024-01-15T10:30:00Z",
-  updatedAt: "2024-01-15T10:30:00Z",
-  blockHeight: 1234567,
-  transactionHash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  ipfsHash: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
-  isPublic: true,
-  allowCommercialUse: false
-};
+interface Dataset {
+  id: string;
+  name: string;
+  description: string;
+  creator: string;
+  hash: string;
+  licenseType: string;
+  category: string;
+  tags: string[];
+  size: string;
+  downloads: number;
+  views: number;
+  trustScore: number;
+  verified: boolean;
+  createdAt: string;
+  updatedAt: string;
+  blockHeight: number;
+  transactionHash: string;
+  cid: string;
+  isPublic: boolean;
+  allowCommercialUse: boolean;
+}
 
 const versionHistory = [
   {
@@ -60,7 +63,7 @@ const versionHistory = [
     size: "2.3 GB"
   },
   {
-    version: "1.1.0", 
+    version: "1.1.0",
     hash: "QmPreviousHashExample123456789abcdef",
     date: "2024-01-10",
     changes: "Fixed data formatting issues and added metadata descriptions",
@@ -69,7 +72,7 @@ const versionHistory = [
   {
     version: "1.0.0",
     hash: "QmOriginalHashExample987654321fedcba",
-    date: "2024-01-05", 
+    date: "2024-01-05",
     changes: "Initial dataset release with core COVID-19 research data",
     size: "2.0 GB"
   }
@@ -84,7 +87,7 @@ const similarDatasets = [
     similarity: 85
   },
   {
-    id: "3", 
+    id: "3",
     title: "Pandemic Response Analysis",
     creator: "0x9876...1234",
     trustScore: 92,
@@ -93,10 +96,99 @@ const similarDatasets = [
 ];
 
 export default function DatasetDetail({ params }: DatasetDetailProps) {
-  // Using params for future implementation
-  console.log("Dataset ID:", params.id);
   const [activeTab, setActiveTab] = useState("overview");
   const [liked, setLiked] = useState(false);
+  const [datasetMetadata, setDatasetMetadata] = useState<Dataset | null>(null);
+  const [loading, setLoading] = useState(true);
+
+
+  useEffect(() => {
+    const fetchDataset = async () => {
+      try {
+        setLoading(true);
+        
+        // First try to fetch from the dataset API by ID
+        let response = await fetch(`/api/dataset/${params.id}`);
+        let data = await response.json();
+        
+        if (data.success) {
+          setDatasetMetadata(data.dataset);
+        } else {
+          // If not found by ID, try to find it in the datasets list (might be a CID)
+          console.log("Dataset not found by ID, searching in datasets list...");
+          const datasetsResponse = await fetch('/api/datasets');
+          const datasetsData = await datasetsResponse.json();
+          
+          if (datasetsData.success) {
+            // Look for dataset by ID or CID
+            const foundDataset = datasetsData.datasets.find((d: any) => 
+              d.id === params.id || d.cid === params.id
+            );
+            
+            if (foundDataset) {
+              // Convert to expected format
+              setDatasetMetadata({
+                id: foundDataset.id,
+                name: foundDataset.title,
+                description: foundDataset.description,
+                creator: foundDataset.creator,
+                hash: foundDataset.cid || foundDataset.id,
+                licenseType: foundDataset.licenseType || 'Unknown',
+                category: 'Dataset',
+                tags: foundDataset.tags || [],
+                size: foundDataset.size,
+                downloads: foundDataset.downloads,
+                views: foundDataset.views || 0,
+                trustScore: foundDataset.trustScore,
+                verified: foundDataset.verified,
+                createdAt: foundDataset.lastUpdated || new Date().toISOString(),
+                updatedAt: foundDataset.lastUpdated || new Date().toISOString(),
+                blockHeight: 0,
+                transactionHash: foundDataset.cid || '',
+                cid: foundDataset.cid || foundDataset.id,
+                isPublic: true,
+                allowCommercialUse: foundDataset.licenseType !== 'Private'
+              });
+            } else {
+              console.error("Dataset not found in datasets list");
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching dataset:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDataset();
+  }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-400 mx-auto mb-4"></div>
+          <h2 className="text-2xl font-bold mb-4">Loading Dataset...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!datasetMetadata) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white flex items-center justify-center">
+        <div className="text-center">
+          <Database className="h-16 w-16 text-gray-600 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-4">Dataset Not Found</h2>
+          <p className="text-gray-400 mb-6">The dataset you are looking for does not exist or is unavailable.</p>
+          <Button asChild className="bg-purple-600 hover:bg-purple-700 rounded-xl">
+            <Link href="/explore">Explore Other Datasets</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 via-black to-gray-900 text-white cyber-grid">
@@ -125,24 +217,33 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
 
             {/* Action Buttons */}
             <div className="flex flex-col gap-3 ml-6">
-              <Button 
-                onClick={() => window.open(`/api/files/QmXNT8ps3MAv2FmCNeeXnzuudfQJR7JKMEKwdrsboyerFt?download=true`, '_blank')}
+              <Button
+                onClick={() => {
+                  const downloadUrl = generateFileUrl(datasetMetadata.cid, { 
+                    download: true, 
+                    filename: `${datasetMetadata.name.replace(/[^a-zA-Z0-9]/g, '_')}.zip` 
+                  });
+                  window.open(downloadUrl, '_blank');
+                }}
                 className="bg-purple-600 hover:bg-purple-700 rounded-xl px-6"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Download Dataset
               </Button>
-              <Button 
-                onClick={() => window.open(`https://brown-imaginative-bug-610.mypinata.cloud/ipfs/QmXNT8ps3MAv2FmCNeeXnzuudfQJR7JKMEKwdrsboyerFt`, '_blank')}
-                variant="outline" 
+              <Button
+                onClick={() => {
+                  const ipfsUrl = generateDirectIpfsUrl(datasetMetadata.cid);
+                  window.open(ipfsUrl, '_blank');
+                }}
+                variant="outline"
                 className="border-gray-600 text-gray-300 hover:bg-gray-700 rounded-xl px-6"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 View on IPFS
               </Button>
               <div className="flex gap-2">
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="sm"
                   onClick={() => setLiked(!liked)}
                   className={`rounded-xl ${liked ? 'text-red-400' : 'text-gray-400'}`}
@@ -206,7 +307,7 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-orange-400" />
               <div>
-                <p className="text-sm font-bold text-white truncate">{datasetMetadata.owner.slice(0, 8)}...</p>
+                <p className="text-sm font-bold text-white truncate">{datasetMetadata.creator.slice(0, 8)}...</p>
                 <p className="text-xs text-gray-400">Owner</p>
               </div>
             </div>
@@ -216,7 +317,7 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
             <div className="flex items-center gap-2">
               <Calendar className="h-5 w-5 text-yellow-400" />
               <div>
-                <p className="text-sm font-bold text-white">Jan 15</p>
+                <p className="text-sm font-bold text-white">{new Date(datasetMetadata.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
                 <p className="text-xs text-gray-400">Updated</p>
               </div>
             </div>
@@ -228,6 +329,7 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
           <div className="flex space-x-1 bg-gray-800/30 p-1 rounded-2xl w-fit">
             {[
               { id: "overview", label: "Overview" },
+              { id: "content", label: "File Content" },
               { id: "versions", label: "Version History" },
               { id: "blockchain", label: "Blockchain Info" },
               { id: "similar", label: "Similar Datasets" }
@@ -310,6 +412,65 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
               </div>
             )}
 
+            {activeTab === "content" && (
+              <div className="space-y-6">
+                {datasetMetadata.cid ? (
+                  <Card className="bg-gray-800/50 border-gray-700 p-6 rounded-3xl">
+                    <h3 className="text-xl font-semibold mb-6 text-white">File Content</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-gray-400 text-sm">IPFS CID</p>
+                          <p className="text-white font-mono text-sm">{datasetMetadata.cid}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => {
+                              const downloadUrl = generateFileUrl(datasetMetadata.cid, { 
+                                download: true, 
+                                filename: `${datasetMetadata.name.replace(/[^a-zA-Z0-9]/g, '_')}.zip` 
+                              });
+                              window.open(downloadUrl, '_blank');
+                            }}
+                            className="bg-purple-600 hover:bg-purple-700 rounded-xl"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              const ipfsUrl = generateDirectIpfsUrl(datasetMetadata.cid);
+                              window.open(ipfsUrl, '_blank');
+                            }}
+                            variant="outline"
+                            className="border-gray-600 text-gray-300 hover:bg-gray-700 rounded-xl"
+                          >
+                            <ExternalLink className="h-4 w-4 mr-2" />
+                            View on IPFS
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <FilePreview
+                        cid={datasetMetadata.cid}
+                        filename={datasetMetadata.name}
+                        size={datasetMetadata.size}
+                        showPreview={true}
+                      />
+                    </div>
+                  </Card>
+                ) : (
+                  <Card className="bg-gray-800/50 border-gray-700 p-6 rounded-3xl">
+                    <div className="text-center py-8">
+                      <FileText className="h-16 w-16 text-gray-600 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-gray-400 mb-2">No File Content Available</h3>
+                      <p className="text-gray-500">This dataset doesn't have associated file content or IPFS CID.</p>
+                    </div>
+                  </Card>
+                )}
+              </div>
+            )}
+
             {activeTab === "versions" && (
               <Card className="bg-gray-800/50 border-gray-700 p-6 rounded-3xl">
                 <h3 className="text-xl font-semibold mb-6 text-white">Version History</h3>
@@ -349,7 +510,7 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
                     </div>
                     <div>
                       <h4 className="font-medium text-white mb-2">IPFS Hash</h4>
-                      <p className="text-gray-300 font-mono text-sm break-all">{datasetMetadata.ipfsHash}</p>
+                      <p className="text-gray-300 font-mono text-sm break-all">{datasetMetadata.cid}</p>
                     </div>
                   </div>
 
@@ -399,7 +560,7 @@ export default function DatasetDetail({ params }: DatasetDetailProps) {
                 </div>
                 <div>
                   <p className="font-medium text-white">Research Institute</p>
-                  <p className="text-sm text-gray-400 font-mono">{datasetMetadata.owner.slice(0, 12)}...</p>
+                  <p className="text-sm text-gray-400 font-mono">{datasetMetadata.creator.slice(0, 12)}...</p>
                 </div>
               </div>
               <div className="space-y-2 text-sm">

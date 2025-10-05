@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PinataSDK } from 'pinata';
 
 export async function GET(
   request: NextRequest,
@@ -8,6 +9,7 @@ export async function GET(
     const { cid } = params;
     const { searchParams } = new URL(request.url);
     const download = searchParams.get('download') === 'true';
+    const filename = searchParams.get('filename');
 
     if (!cid) {
       return NextResponse.json(
@@ -16,27 +18,41 @@ export async function GET(
       );
     }
 
-    // Your Pinata gateway URL
-    const ipfsGateway = process.env.IPFS_GATEWAY || 'https://brown-imaginative-bug-610.mypinata.cloud/ipfs';
-    const fileUrl = `${ipfsGateway}/${cid}`;
+    const pinataJwt = process.env.PINATA_JWT;
+    const pinataGateway = process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace('https://', '').replace('/ipfs', '') || 'brown-imaginative-bug-610.mypinata.cloud';
 
-    console.log('Accessing file:', fileUrl);
+    if (!pinataJwt) {
+      return NextResponse.json(
+        { success: false, error: 'PINATA_JWT is not set' },
+        { status: 500 }
+      );
+    }
+
+    const pinata = new PinataSDK({
+      pinataJwt: pinataJwt,
+      pinataGateway: pinataGateway,
+    });
+
+    console.log('Accessing file with Pinata SDK:', cid);
 
     try {
-      const fileResponse = await fetch(fileUrl);
+      // Use direct gateway access (as per Pinata docs)
+      console.log('Fetching from Pinata gateway:', `https://${pinataGateway}/ipfs/${cid}`);
+      const gatewayUrl = `https://${pinataGateway}/ipfs/${cid}`;
+      const response = await fetch(gatewayUrl);
       
-      if (!fileResponse.ok) {
-        console.error('IPFS fetch failed:', fileResponse.status, fileResponse.statusText);
+      if (!response.ok) {
+        console.error('Gateway fetch failed:', response.status, response.statusText);
         return NextResponse.json(
-          { success: false, error: 'File not found on IPFS', status: fileResponse.status },
+          { success: false, error: 'File not found on IPFS' },
           { status: 404 }
         );
       }
 
-      const fileBuffer = await fileResponse.arrayBuffer();
-      const contentType = fileResponse.headers.get('Content-Type') || 'application/octet-stream';
-      
-      console.log('File fetched successfully:', {
+      const fileBuffer = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+      console.log('File fetched successfully from Pinata gateway:', {
         size: fileBuffer.byteLength,
         contentType,
         cid
@@ -44,22 +60,66 @@ export async function GET(
 
       const headers: Record<string, string> = {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+        'Cache-Control': 'public, max-age=31536000, immutable', // Cache for 1 year with immutable
         'X-IPFS-CID': cid,
+        'X-Gateway': pinataGateway,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
       };
 
       if (download) {
-        headers['Content-Disposition'] = `attachment; filename="${cid}"`;
+        const downloadFilename = filename || `dataset-${cid.slice(0, 8)}.bin`;
+        headers['Content-Disposition'] = `attachment; filename="${downloadFilename}"`;
       }
 
       return new NextResponse(fileBuffer, { headers });
 
-    } catch (fetchError) {
-      console.error('IPFS fetch error:', fetchError);
-      return NextResponse.json(
-        { success: false, error: 'Failed to retrieve file from IPFS', details: fetchError instanceof Error ? fetchError.message : 'Unknown error' },
-        { status: 500 }
-      );
+    } catch (gatewayError) {
+      console.error('Pinata gateway fetch error:', gatewayError);
+      
+      // Fallback to public IPFS gateway
+      try {
+        console.log('Attempting fallback to public IPFS gateway...');
+        const publicGatewayUrl = `https://ipfs.io/ipfs/${cid}`;
+        const fallbackResponse = await fetch(publicGatewayUrl);
+        
+        if (!fallbackResponse.ok) {
+          throw new Error(`Public gateway fetch failed: ${fallbackResponse.statusText}`);
+        }
+        
+        const fallbackBuffer = await fallbackResponse.arrayBuffer();
+        const fallbackContentType = fallbackResponse.headers.get('content-type') || 'application/octet-stream';
+        
+        const headers: Record<string, string> = {
+          'Content-Type': fallbackContentType,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'X-IPFS-CID': cid,
+          'X-Fallback': 'public-gateway',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        };
+
+        if (download) {
+          const downloadFilename = filename || `dataset-${cid.slice(0, 8)}.bin`;
+          headers['Content-Disposition'] = `attachment; filename="${downloadFilename}"`;
+        }
+
+        return new NextResponse(fallbackBuffer, { headers });
+        
+      } catch (fallbackError) {
+        console.error('Public gateway access also failed:', fallbackError);
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Failed to retrieve file from IPFS', 
+            details: gatewayError instanceof Error ? gatewayError.message : 'Unknown error',
+            fallbackError: fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error'
+          },
+          { status: 500 }
+        );
+      }
     }
 
   } catch (error) {
@@ -83,7 +143,3 @@ export async function OPTIONS() {
   });
 }
 
-// Required for static export
-export async function generateStaticParams() {
-  return [];
-}

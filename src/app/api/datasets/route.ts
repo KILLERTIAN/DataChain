@@ -22,70 +22,78 @@ export async function GET(request: NextRequest) {
       console.log('Attempting to fetch from blockchain...');
       const blockchainDatasets = await fetchDatasetsFromBlockchain(creator);
       console.log('Blockchain datasets found:', blockchainDatasets.length);
-
-      if (blockchainDatasets.length > 0) {
-        datasets = blockchainDatasets;
-        console.log('Using blockchain datasets');
-      }
+      datasets = [...datasets, ...blockchainDatasets];
     } catch (error) {
       console.log('Blockchain fetch failed:', error);
     }
 
-    // If no blockchain data, try local dataStore
-    if (datasets.length === 0) {
-      console.log('No blockchain data, trying local dataStore...');
-      datasets = creator
-        ? dataStore.getDatasetsByCreator(creator)
-        : dataStore.getAllDatasets();
-      console.log('Local dataStore datasets:', datasets.length);
-    }
+    // Always include local dataStore datasets
+    // Always include local dataStore datasets
+    const localDatasets = creator
+      ? dataStore.getDatasetsByCreator(creator)
+      : dataStore.getAllDatasets();
+    console.log('Local dataStore datasets:', localDatasets.length);
+    datasets = [...datasets, ...localDatasets];
 
-    // If still no data, add your known uploaded datasets as fallback
-    if (datasets.length === 0 && !creator) {
-      console.log('No data found, using fallback datasets...');
-      datasets = [
-        {
-          id: "1",
-          name: "Resume",
-          creator: "0x6069bfc76f707ec5fff32d1fbced5575eb3069ef94f4ee11dd1be1a3ee5d6a6d",
-          description: "om resume",
-          category: "Education & Research",
-          tags: [],
-          license: "MIT",
-          size: 29281,
-          downloads: Math.floor(Math.random() * 100) + 50,
-          views: Math.floor(Math.random() * 500) + 100,
-          trustScore: 85 + Math.floor(Math.random() * 15),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          cid: "QmXNT8ps3MAv2FmCNeeXnzuudfQJR7JKMEKwdrsboyerFt",
-          hash: "3138f2ac285f249ff0be1239a35279531316381fb08bcc128ef96df352904f75",
-          status: "Public",
-          price: 0
-        },
-        {
-          id: "2",
-          name: "Test Dataset 2",
-          creator: "0x6069bfc76f707ec5fff32d1fbced5575eb3069ef94f4ee11dd1be1a3ee5d6a6d",
-          description: "Another test dataset from Pinata",
-          category: "Other",
-          tags: ["test", "demo", "pinata"],
-          license: "MIT",
-          size: 1024000,
-          downloads: Math.floor(Math.random() * 100) + 25,
-          views: Math.floor(Math.random() * 500) + 75,
-          trustScore: 85 + Math.floor(Math.random() * 15),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          cid: "QmPSHqX677VupRV9YmDxKR2c7pq6DbDya3AzsBBvjPLf6X",
-          hash: "07360801a1df327158b068299f9521d6fc0fce9d20f950f19c9eb52403a713cb",
-          status: "Public",
-          price: 0
+    // Always try to fetch from Pinata API (if no creator filter)
+    if (!creator) {
+      console.log('Fetching from Pinata API...');
+      try {
+        const pinataJwt = process.env.PINATA_JWT;
+        if (pinataJwt) {
+          const pinListResponse = await fetch('https://api.pinata.cloud/data/pinList?pageLimit=50', {
+            headers: {
+              'Authorization': `Bearer ${pinataJwt}`,
+            },
+          });
+
+          if (pinListResponse.ok) {
+            const pinataData = await pinListResponse.json();
+            if (pinataData.rows && pinataData.rows.length > 0) {
+              const pinataDatasets = pinataData.rows.map((pin: any, index: number) => ({
+                id: pin.ipfs_pin_hash,
+                name: pin.metadata?.name || `Dataset ${index + 1}`,
+                creator: 'Pinata Upload',
+                description: pin.metadata?.keyvalues?.description || 'Dataset uploaded via Pinata',
+                category: pin.metadata?.keyvalues?.category || 'Other',
+                tags: pin.metadata?.keyvalues?.tags ? (
+                  typeof pin.metadata.keyvalues.tags === 'string'
+                    ? JSON.parse(pin.metadata.keyvalues.tags)
+                    : pin.metadata.keyvalues.tags
+                ) : [],
+                license: pin.metadata?.keyvalues?.license || 'Unknown',
+                size: pin.size,
+                downloads: Math.floor(Math.random() * 100) + 1,
+                views: Math.floor(Math.random() * 500) + 1,
+                trustScore: 80 + Math.floor(Math.random() * 20),
+                createdAt: pin.date_pinned,
+                updatedAt: pin.date_pinned,
+                cid: pin.ipfs_pin_hash,
+                hash: pin.ipfs_pin_hash,
+                status: 'Public',
+                price: 0,
+              }));
+              datasets = [...datasets, ...pinataDatasets]; // Append instead of replace
+              console.log('Added datasets from Pinata API:', pinataDatasets.length);
+            }
+          } else {
+            const errorText = await pinListResponse.text();
+            console.error('Pinata API error:', pinListResponse.status, errorText);
+          }
+        } else {
+          console.log('PINATA_JWT not set, skipping Pinata API.');
         }
-      ];
+      } catch (pinataError) {
+        console.error('Error fetching from Pinata API:', pinataError);
+      }
     }
 
     console.log('Final datasets count:', datasets.length);
+    console.log('Dataset sources:', {
+      blockchain: datasets.filter(d => d.creator !== 'Pinata Upload' && d.creator.startsWith('0x')).length,
+      pinata: datasets.filter(d => d.creator === 'Pinata Upload').length,
+      local: datasets.filter(d => d.creator !== 'Pinata Upload' && !d.creator.startsWith('0x')).length
+    });
 
     // Apply search filter
     if (search) {
@@ -131,20 +139,27 @@ export async function GET(request: NextRequest) {
     const paginatedDatasets = datasets.slice(offset, offset + limit);
 
     // Transform for frontend
-    const transformedDatasets = paginatedDatasets.map(dataset => ({
-      id: dataset.id,
-      title: dataset.name,
-      creator: dataset.creator,
-      trustScore: dataset.trustScore,
-      description: dataset.description,
-      tags: dataset.tags,
-      size: `${(dataset.size / 1024 / 1024).toFixed(2)} MB`,
-      downloads: dataset.downloads,
-      lastUpdated: dataset.updatedAt.split('T')[0], // Just the date part
-      licenseType: dataset.license,
-      verified: dataset.trustScore >= 90,
-      cid: dataset.cid
-    }));
+    const transformedDatasets = paginatedDatasets.map(dataset => {
+      try {
+        return {
+          id: dataset.id,
+          title: dataset.name || dataset.title || 'Untitled Dataset',
+          creator: dataset.creator,
+          trustScore: dataset.trustScore || 85,
+          description: dataset.description || '',
+          tags: dataset.tags || [],
+          size: dataset.size ? `${(dataset.size / 1024 / 1024).toFixed(2)} MB` : 'Unknown',
+          downloads: dataset.downloads || 0,
+          lastUpdated: dataset.updatedAt ? dataset.updatedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+          licenseType: dataset.license || 'Unknown',
+          verified: (dataset.trustScore || 85) >= 90,
+          cid: dataset.cid || dataset.hash
+        };
+      } catch (error) {
+        console.error('Error transforming dataset:', dataset, error);
+        return null;
+      }
+    }).filter(Boolean);
 
     // Get statistics
     const stats = dataStore.getStats();

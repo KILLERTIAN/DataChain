@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Shield, Download, Database, ExternalLink } from "lucide-react";
+import { generateFileUrl, generateDirectIpfsUrl } from "@/lib/pinata";
 
 interface DatasetCardProps {
   title: string;
@@ -35,7 +36,11 @@ export function DatasetCard({
     e.preventDefault();
     e.stopPropagation();
     if (cid) {
-      window.open(`/api/files/${cid}?download=true`, '_blank');
+      const downloadUrl = generateFileUrl(cid, { 
+        download: true, 
+        filename: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.zip` 
+      });
+      window.open(downloadUrl, '_blank');
     }
   };
 
@@ -43,7 +48,8 @@ export function DatasetCard({
     e.preventDefault();
     e.stopPropagation();
     if (cid) {
-      window.open(`https://brown-imaginative-bug-610.mypinata.cloud/ipfs/${cid}`, '_blank');
+      const ipfsUrl = generateDirectIpfsUrl(cid);
+      window.open(ipfsUrl, '_blank');
     }
   };
   return (

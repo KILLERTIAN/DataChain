@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DatasetCard } from "@/components/DatasetCard";
-import { Search, Filter, Grid, List, Database, Users, Calendar, Shield } from "lucide-react";
+import { SmartFileViewer } from "@/components/SmartFileViewer";
+import { Search, Filter, Grid, List, Database, Users, Calendar, Shield, RefreshCw } from "lucide-react";
 
 function ExplorePage() {
   const [search, setSearch] = useState("");
@@ -17,8 +19,10 @@ function ExplorePage() {
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pinataFiles, setPinataFiles] = useState<any[]>([]);
+  const [showPinataFiles, setShowPinataFiles] = useState(false);
 
-  // Fetch datasets from API
+  // Fetch datasets from API (includes Pinata files)
   const fetchDatasets = async () => {
     try {
       setLoading(true);
@@ -37,10 +41,20 @@ function ExplorePage() {
       console.log('Datasets API response:', data);
 
       if (data.success) {
-        setDatasets(data.datasets || []);
+        const allDatasets = data.datasets || [];
+        
+        // Separate Pinata files from other datasets
+        const pinataDatasets = allDatasets.filter((d: any) => d.creator === 'Pinata Upload');
+        const otherDatasets = allDatasets.filter((d: any) => d.creator !== 'Pinata Upload');
+        
+        setDatasets(allDatasets);
+        setPinataFiles(pinataDatasets);
         setStats(data.stats || {});
         setError(null);
-        console.log('Datasets loaded:', data.datasets?.length || 0);
+        
+        console.log('Total datasets loaded:', allDatasets.length);
+        console.log('Pinata files:', pinataDatasets.length);
+        console.log('Other datasets:', otherDatasets.length);
       } else {
         setError(data.error || 'Failed to fetch datasets');
         console.error('API error:', data.error);
@@ -52,6 +66,8 @@ function ExplorePage() {
       setLoading(false);
     }
   };
+
+
 
   // Fetch data on component mount and when filters change
   useEffect(() => {
@@ -194,10 +210,12 @@ function ExplorePage() {
                 {loading ? (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-400 mr-2"></div>
                 ) : (
-                  <Database className="h-4 w-4 mr-2" />
+                  <RefreshCw className="h-4 w-4 mr-2" />
                 )}
                 Refresh
               </Button>
+
+
 
               <select
                 value={sortBy}
@@ -267,34 +285,28 @@ function ExplorePage() {
 
         {/* Results */}
         <div className="mb-6 flex items-center justify-between">
-          <p className="text-gray-400">
-            Showing {filteredDatasets.length} of {datasets.length} datasets
-          </p>
-          
-          {/* Debug Info */}
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={() => window.open('/api/test-datasets', '_blank')}
-              variant="outline"
-              size="sm"
-              className="border-yellow-600 text-yellow-300 hover:bg-yellow-700/20 rounded-xl"
-            >
-              Debug Blockchain
-            </Button>
-            
-            <Button
-              onClick={() => {
-                console.log('Current datasets:', datasets);
-                console.log('Filtered datasets:', filteredDatasets);
-                console.log('Stats:', stats);
-              }}
-              variant="outline"
-              size="sm"
-              className="border-blue-600 text-blue-300 hover:bg-blue-700/20 rounded-xl"
-            >
-              Log Data
-            </Button>
+          <div className="flex items-center gap-4">
+            <p className="text-gray-400">
+              Showing {filteredDatasets.length} of {datasets.length} datasets
+            </p>
+            {pinataFiles.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-green-400">
+                  {pinataFiles.length} from Pinata
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPinataFiles(!showPinataFiles)}
+                  className="text-green-400 hover:text-green-300"
+                >
+                  {showPinataFiles ? 'Hide' : 'Show'} Pinata Files
+                </Button>
+              </div>
+            )}
           </div>
+          
+
         </div>
 
         {/* Loading State */}
@@ -318,6 +330,53 @@ function ExplorePage() {
           </div>
         )}
 
+        {/* Pinata Files Section */}
+        {showPinataFiles && pinataFiles.length > 0 && (
+          <div className="mb-12">
+            <Card className="bg-gradient-to-r from-green-900/20 to-green-800/20 border-green-700/50 p-6 rounded-3xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-green-300 mb-2">Files from Pinata IPFS</h2>
+                  <p className="text-green-400/80">
+                    {pinataFiles.length} files directly from your Pinata account
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setShowPinataFiles(false)}
+                  variant="ghost"
+                  className="text-green-400 hover:text-green-300"
+                >
+                  Hide
+                </Button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {pinataFiles.map((file) => (
+                  <Card key={file.id} className="bg-gray-800/50 border-green-700/30 p-4 rounded-2xl">
+                    <div className="mb-4">
+                      <h3 className="text-lg font-semibold text-white mb-2">{file.title}</h3>
+                      <p className="text-gray-400 text-sm mb-3">{file.description}</p>
+                      <div className="flex items-center gap-2 text-xs text-green-400 mb-3">
+                        <span>📁 {file.size}</span>
+                        <span>⬇️ {file.downloads}</span>
+                        <span>🔗 Pinata IPFS</span>
+                      </div>
+                    </div>
+                    
+                    {file.cid && (
+                      <SmartFileViewer
+                        cid={file.cid}
+                        filename={file.title}
+                        size={file.size}
+                      />
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
         {/* Dataset Grid/List */}
         {!loading && !error && (viewMode === "grid" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -327,7 +386,7 @@ function ExplorePage() {
                 title={dataset.title}
                 creator={dataset.creator}
                 trustScore={dataset.trustScore}
-                href={`/datasets/${dataset.id}`}
+                href={`/datasets/${dataset.cid || dataset.id}`}
                 description={dataset.description}
                 tags={dataset.tags}
                 size={dataset.size}
@@ -349,6 +408,11 @@ function ExplorePage() {
                       {dataset.verified && (
                         <Shield className="h-5 w-5 text-green-400" />
                       )}
+                      {dataset.creator === 'Pinata Upload' && (
+                        <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">
+                          Pinata IPFS
+                        </span>
+                      )}
                     </div>
                     <p className="text-gray-400 mb-3">{dataset.description}</p>
                     <div className="flex flex-wrap gap-2 mb-3">
@@ -359,15 +423,20 @@ function ExplorePage() {
                       ))}
                     </div>
                     <div className="flex items-center gap-6 text-sm text-gray-400">
-                      <span>Creator: {dataset.creator}</span>
+                      <span>Creator: {dataset.creator === 'Pinata Upload' ? 'Pinata IPFS' : `${dataset.creator.slice(0, 8)}...`}</span>
                       <span>Size: {dataset.size}</span>
                       <span>Downloads: {dataset.downloads}</span>
                       <span>Trust Score: {dataset.trustScore}%</span>
                     </div>
                   </div>
-                  <Button className="bg-purple-600 hover:bg-purple-700 rounded-xl">
-                    View Details
-                  </Button>
+                  <div className="flex flex-col gap-2">
+                    <Link href={`/datasets/${dataset.cid || dataset.id}`}>
+                      <Button className="bg-purple-600 hover:bg-purple-700 rounded-xl">
+                        View Details
+                      </Button>
+                    </Link>
+
+                  </div>
                 </div>
               </Card>
             ))}

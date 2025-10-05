@@ -4,26 +4,33 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Download, ExternalLink, Eye, FileText } from "lucide-react";
-import { generateFileUrl, generateDirectIpfsUrl, isImageFile } from "@/lib/pinata";
 
-interface FileViewerProps {
+interface StaticFileViewerProps {
   cid: string;
   filename?: string;
   size?: string;
+  gateway?: string;
 }
 
-export function FileViewer({ cid, filename = "dataset", size }: FileViewerProps) {
+/**
+ * Static File Viewer - Works with static export by directly accessing IPFS gateways
+ * Use this component when you need static export compatibility
+ */
+export function StaticFileViewer({ 
+  cid, 
+  filename = "dataset", 
+  size,
+  gateway = "https://brown-imaginative-bug-610.mypinata.cloud/ipfs"
+}: StaticFileViewerProps) {
   const [loading, setLoading] = useState(false);
+
+  const directUrl = `${gateway}/${cid}`;
 
   const handleDownload = async () => {
     setLoading(true);
     try {
-      const downloadUrl = generateFileUrl(cid, { 
-        download: true, 
-        filename: filename 
-      });
-      const response = await fetch(downloadUrl);
-      
+      // Direct download from IPFS gateway
+      const response = await fetch(directUrl);
       if (response.ok) {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
@@ -35,8 +42,7 @@ export function FileViewer({ cid, filename = "dataset", size }: FileViewerProps)
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        console.error('Download failed:', response.status);
-        alert('Download failed. Please try again.');
+        throw new Error(`Download failed: ${response.statusText}`);
       }
     } catch (error) {
       console.error('Download error:', error);
@@ -47,13 +53,11 @@ export function FileViewer({ cid, filename = "dataset", size }: FileViewerProps)
   };
 
   const handleViewOnIPFS = () => {
-    const ipfsUrl = generateDirectIpfsUrl(cid);
-    window.open(ipfsUrl, '_blank');
+    window.open(directUrl, '_blank');
   };
 
   const handlePreview = () => {
-    const previewUrl = generateFileUrl(cid);
-    window.open(previewUrl, '_blank');
+    window.open(directUrl, '_blank');
   };
 
   return (
@@ -65,6 +69,7 @@ export function FileViewer({ cid, filename = "dataset", size }: FileViewerProps)
             <p className="font-medium text-white">{filename}</p>
             <p className="text-sm text-gray-400">CID: {cid.slice(0, 12)}...</p>
             {size && <p className="text-xs text-gray-500">Size: {size}</p>}
+            <p className="text-xs text-blue-400">Static Mode</p>
           </div>
         </div>
       </div>
